@@ -1,4 +1,4 @@
-# rageutils v1.0
+# RageUtils v1.0
 Quality of Life mod for RageMines
 
 `/ru csb` to toggle on and off
