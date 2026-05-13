@@ -12,4 +12,4 @@ If the version you want to use isn't in Releases, change these variables in `gra
 
 `/ru` ingame for info
 
-DM `therearefewtomorrows` on discord if you encounter any glitches
+DM `therearefewtomorrows` on discord if you encounter any glitches/problems and I'd be happy to handle it :)
