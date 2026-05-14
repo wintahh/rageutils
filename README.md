@@ -12,7 +12,7 @@ If the version you want to use isn't in Releases, change these variables in `gra
 - `loader_version`
 - `loom_version`
 - `fabric_api_version`
-  And change `depends/minecraft` in `src/main/resources/fabric.mod.json`
+- And change `depends/minecraft` in `src/main/resources/fabric.mod.json`
 
 `/ru` ingame for help
 
