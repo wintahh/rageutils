@@ -2,15 +2,17 @@ package wintahh.rageutils.command;
 
 import com.mojang.brigadier.CommandDispatcher;
 import com.mojang.brigadier.tree.LiteralCommandNode;
-
 import net.fabricmc.fabric.api.client.command.v2.ClientCommandManager;
 import net.fabricmc.fabric.api.client.command.v2.ClientCommandRegistrationCallback;
 import net.fabricmc.fabric.api.client.command.v2.FabricClientCommandSource;
-
 import wintahh.rageutils.RageUtils;
-
 import net.minecraft.client.MinecraftClient;
 import net.minecraft.text.Text;
+
+import wintahh.rageutils.module.Module;
+import wintahh.rageutils.module.ModuleRegistry;
+
+import com.mojang.brigadier.arguments.StringArgumentType;
 
 public class RageUtilsCommand {
 
@@ -31,23 +33,33 @@ public class RageUtilsCommand {
                             Text.literal("§c[RageUtils] §rHi " + mc.player.getName().getString() + "! Welcome to RageUtils! The current modules are:"),
                             false
                         );
-                        mc.player.sendMessage(
-                            Text.literal("§c[RageUtils] §rClientSideBlast §7: §e/ru csb"),
-                            false
-                        );
+                        for (Module m : ModuleRegistry.getAll()) {
+                            mc.player.sendMessage(
+                                Text.literal("§c[RageUtils] §r" + m.getName() + " §7: §e" + m.getCommand()),
+                                false
+                            );
+                        }
                     }
                     return 1;
                 })
-                .then(ClientCommandManager.literal("clientsideblast")
-                    .executes(ctx -> {
-                        RageUtils.CLIENTSIDE_BLAST.toggle();
-                        return 1;
-                    }))
+                // clientsideblast
                 .then(ClientCommandManager.literal("csb")
                     .executes(ctx -> {
                         RageUtils.CLIENTSIDE_BLAST.toggle();
                         return 1;
                     }))
+                // ratehud
+                .then(ClientCommandManager.literal("rh")
+                    .then(ClientCommandManager.literal("mine")
+                        .executes(ctx -> {
+                            RageUtils.RATE_HUD.toggleMining();
+                            return 1;
+                        }))
+                    .then(ClientCommandManager.literal("reset")
+                        .executes(ctx -> {
+                            RageUtils.RATE_HUD.resetCounters();
+                            return 1;
+                        })))
         );
     }
 }

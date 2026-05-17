@@ -21,6 +21,7 @@ public class ClientPlayerInteractionManagerMixin {
         if (hit == null || hit.getType() != HitResult.Type.BLOCK) return;
 
         Direction face = ((BlockHitResult) hit).getSide();
+        RageUtils.RATE_HUD.onBlockBroken(pos, face); // ordering is important. rate_hud needs to be before clientside_blast
         RageUtils.CLIENTSIDE_BLAST.onBreakBlock(pos, face);
     }
 }

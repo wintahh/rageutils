@@ -16,23 +16,9 @@ import net.minecraft.item.Items;
 import net.minecraft.component.DataComponentTypes;
 import net.minecraft.component.type.LoreComponent;
 
-public class ClientSideBlast {
-
-    private boolean enabled = false;
-
-    public void toggle() {
-        enabled = !enabled;
-        MinecraftClient mc = MinecraftClient.getInstance();
-        if (mc.player != null) {
-            mc.player.sendMessage(
-                Text.literal("[RageUtils] ClientSideBlast: " + (enabled ? "§aON" : "§cOFF")),
-                true
-            );
-        }
-    }
-
-    public boolean isEnabled() {
-        return enabled;
+public class ClientSideBlast extends Module {
+    public ClientSideBlast() {
+        super("ClientSideBlast", "/ru csb");
     }
 
     public boolean shouldBlast(BlockPos pos) {
@@ -71,7 +57,7 @@ public class ClientSideBlast {
     }
 
     public void onBreakBlock(BlockPos pos, Direction face) {
-        if (!enabled) return;
+        if (!isEnabled()) return;
         if (!shouldBlast(pos)) return;
 
         MinecraftClient mc = MinecraftClient.getInstance();
