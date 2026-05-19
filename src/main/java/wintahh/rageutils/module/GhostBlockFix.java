@@ -1,24 +1,30 @@
 package wintahh.rageutils.module;
 
 import net.minecraft.block.BlockState;
-import net.minecraft.block.Blocks;
 import net.minecraft.client.MinecraftClient;
+import net.minecraft.client.network.ClientPlayNetworkHandler;
+import net.minecraft.client.network.PlayerListEntry;
+import net.minecraft.network.packet.c2s.play.PlayerActionC2SPacket;
 import net.minecraft.text.Text;
 import net.minecraft.util.math.BlockPos;
+import net.minecraft.util.math.Direction;
 import net.minecraft.util.math.Vec3d;
 
 import java.util.Iterator;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 
 public class GhostBlockFix extends Module {
-    private static final long MEMORY_TTL_MS = 10_000;
-    private static final long VERIFY_COOLDOWN_MS = 1_500;
+    private static final long MEMORY_TTL_MS = 15_000;
+    private static final long VERIFY_COOLDOWN_MS = 700;
     private static final int SEARCH_RADIUS = 2;
-    private static final int MAX_REPAIRS_PER_TICK = 2;
-    private static final long PROACTIVE_DELAY_MS = 300;
-    private static final int MAX_PROACTIVE_PER_TICK = 4;
-    private static final int MAX_RECENTLY_MINED = 128;
+    private static final int MAX_VERIFICATIONS_PER_TICK = 6;
+    private static final long MIN_PROACTIVE_DELAY_MS = 650;
+    private static final long MAX_PROACTIVE_DELAY_MS = 2_000;
+    private static final long PROACTIVE_RETRY_DELAY_MS = 900;
+    private static final int MAX_PROACTIVE_ATTEMPTS = 3;
+    private static final int MAX_RECENTLY_MINED = 512;
 
     private final Map<BlockPos, MinedBlock> recentlyMined = new LinkedHashMap<>() {
         @Override
@@ -26,8 +32,8 @@ public class GhostBlockFix extends Module {
             return size() > MAX_RECENTLY_MINED;
         }
     };
-    private final Map<BlockPos, Long> lastRepairedAt = new LinkedHashMap<>();
-    private final Map<BlockPos, Long> pendingProactiveVerify = new LinkedHashMap<>();
+    private final Map<BlockPos, Long> lastVerifiedAt = new LinkedHashMap<>();
+    private final Map<BlockPos, ProactiveVerification> pendingProactiveVerify = new LinkedHashMap<>();
     private boolean proactiveEnabled = false;
 
     public GhostBlockFix() {
@@ -46,7 +52,7 @@ public class GhostBlockFix extends Module {
         }
         if (!isEnabled()) {
             recentlyMined.clear();
-            lastRepairedAt.clear();
+            lastVerifiedAt.clear();
             pendingProactiveVerify.clear();
         }
     }
@@ -57,14 +63,21 @@ public class GhostBlockFix extends Module {
 
     public void onBlockBroken(BlockPos pos, BlockState oldState) {
         if (!isEnabled()) return;
+        if (oldState != null && oldState.isAir()) return;
 
         long now = System.currentTimeMillis();
         pruneExpired(now);
+        trackMinedBlock(pos, now);
+    }
 
-        BlockPos immutablePos = pos.toImmutable();
-        recentlyMined.put(immutablePos, new MinedBlock(now, oldState));
-        if (proactiveEnabled) {
-            pendingProactiveVerify.put(immutablePos, now + PROACTIVE_DELAY_MS);
+    public void onBlocksBroken(List<ClientSideBlast.PredictedBreak> breaks) {
+        if (!isEnabled()) return;
+
+        long now = System.currentTimeMillis();
+        pruneExpired(now);
+        for (ClientSideBlast.PredictedBreak predictedBreak : breaks) {
+            if (predictedBreak.oldState() == null || predictedBreak.oldState().isAir()) continue;
+            trackMinedBlock(predictedBreak.pos(), now);
         }
     }
 
@@ -76,7 +89,7 @@ public class GhostBlockFix extends Module {
         pruneExpired(now);
 
         if (mc.player.horizontalCollision || mc.player.verticalCollision) {
-            repairNearbySolidGhosts(mc, mc.player.getBlockPos());
+            verifyNearby(mc, mc.player.getBlockPos());
         }
 
         drainProactiveEntries(mc, now);
@@ -90,8 +103,8 @@ public class GhostBlockFix extends Module {
             if (!isEnabled()) return;
             if (mc.player == null || mc.world == null || mc.getNetworkHandler() == null) return;
 
-            repairNearbyInvisibleGhosts(mc, before);
-            repairNearbyInvisibleGhosts(mc, BlockPos.ofFloored(after));
+            verifyNearby(mc, before);
+            verifyNearby(mc, BlockPos.ofFloored(after));
         });
     }
 
@@ -110,82 +123,80 @@ public class GhostBlockFix extends Module {
         }
     }
 
-    private void repairNearbyInvisibleGhosts(MinecraftClient mc, BlockPos center) {
-        int repairs = 0;
-        for (Map.Entry<BlockPos, MinedBlock> entry : recentlyMined.entrySet()) {
-            BlockPos pos = entry.getKey();
+    private void trackMinedBlock(BlockPos pos, long now) {
+        BlockPos immutablePos = pos.toImmutable();
+        recentlyMined.put(immutablePos, new MinedBlock(now));
+        if (proactiveEnabled) {
+            pendingProactiveVerify.put(immutablePos, new ProactiveVerification(now + getProactiveDelayMs(), 0));
+        }
+    }
+
+    private void verifyNearby(MinecraftClient mc, BlockPos center) {
+        int verified = 0;
+        for (BlockPos pos : recentlyMined.keySet()) {
             if (chebyshevDistance(pos, center) > SEARCH_RADIUS) continue;
 
-            if (repairInvisibleGhost(mc, pos, entry.getValue())) {
-                repairs++;
-                if (repairs >= MAX_REPAIRS_PER_TICK) return;
+            if (sendVerificationPacket(mc, pos)) {
+                verified++;
+                if (verified >= MAX_VERIFICATIONS_PER_TICK) return;
             }
         }
     }
 
-    private void repairNearbySolidGhosts(MinecraftClient mc, BlockPos center) {
-        int repairs = 0;
-        for (Map.Entry<BlockPos, MinedBlock> entry : recentlyMined.entrySet()) {
-            BlockPos pos = entry.getKey();
-            if (chebyshevDistance(pos, center) > SEARCH_RADIUS) continue;
+    private boolean sendVerificationPacket(MinecraftClient mc, BlockPos pos) {
+        ClientPlayNetworkHandler net = mc.getNetworkHandler();
+        if (net == null) return false;
 
-            if (repairSolidGhost(mc, pos, entry.getValue())) {
-                repairs++;
-                if (repairs >= MAX_REPAIRS_PER_TICK) return;
-            }
-        }
-    }
-
-    private boolean repairInvisibleGhost(MinecraftClient mc, BlockPos pos, MinedBlock minedBlock) {
-        if (minedBlock.oldState == null || minedBlock.oldState.isAir()) return false;
-        if (!mc.world.getBlockState(pos).isAir()) return false;
-        if (!canRepair(pos)) return false;
-
-        mc.world.setBlockState(pos, minedBlock.oldState, 19);
-        lastRepairedAt.put(pos.toImmutable(), System.currentTimeMillis());
-        return true;
-    }
-
-    private boolean repairSolidGhost(MinecraftClient mc, BlockPos pos, MinedBlock minedBlock) {
-        if (minedBlock.oldState == null || minedBlock.oldState.isAir()) return false;
-        BlockState currentState = mc.world.getBlockState(pos);
-        if (currentState.isAir() || currentState != minedBlock.oldState) return false;
-        if (!mc.player.collidesWithStateAtPos(pos, currentState)) return false;
-        if (!canRepair(pos)) return false;
-
-        mc.world.setBlockState(pos, Blocks.AIR.getDefaultState(), 19);
-        lastRepairedAt.put(pos.toImmutable(), System.currentTimeMillis());
-        return true;
-    }
-
-    private boolean canRepair(BlockPos pos) {
         long now = System.currentTimeMillis();
-        Long lastRepaired = lastRepairedAt.get(pos);
-        return lastRepaired == null || now - lastRepaired >= VERIFY_COOLDOWN_MS;
+        Long lastVerified = lastVerifiedAt.get(pos);
+        if (lastVerified != null && now - lastVerified < VERIFY_COOLDOWN_MS) return false;
+
+        Direction face = Direction.UP;
+        net.sendPacket(new PlayerActionC2SPacket(
+            PlayerActionC2SPacket.Action.START_DESTROY_BLOCK, pos, face
+        ));
+        net.sendPacket(new PlayerActionC2SPacket(
+            PlayerActionC2SPacket.Action.ABORT_DESTROY_BLOCK, pos, face
+        ));
+        lastVerifiedAt.put(pos.toImmutable(), now);
+        return true;
     }
 
     private void drainProactiveEntries(MinecraftClient mc, long now) {
         if (!proactiveEnabled) return;
 
         int drained = 0;
-        Iterator<Map.Entry<BlockPos, Long>> iterator = pendingProactiveVerify.entrySet().iterator();
-        while (iterator.hasNext() && drained < MAX_PROACTIVE_PER_TICK) {
-            Map.Entry<BlockPos, Long> entry = iterator.next();
-            if (entry.getValue() > now) continue;
+        Iterator<Map.Entry<BlockPos, ProactiveVerification>> iterator = pendingProactiveVerify.entrySet().iterator();
+        while (iterator.hasNext() && drained < MAX_VERIFICATIONS_PER_TICK) {
+            Map.Entry<BlockPos, ProactiveVerification> entry = iterator.next();
+            ProactiveVerification verification = entry.getValue();
+            if (verification.nextAt > now) continue;
 
-            MinedBlock minedBlock = recentlyMined.get(entry.getKey());
-            if (minedBlock != null) {
-                repairSolidGhost(mc, entry.getKey(), minedBlock);
+            sendVerificationPacket(mc, entry.getKey());
+            int nextAttempt = verification.attempt + 1;
+            if (nextAttempt >= MAX_PROACTIVE_ATTEMPTS || !recentlyMined.containsKey(entry.getKey())) {
+                iterator.remove();
+            } else {
+                entry.setValue(new ProactiveVerification(now + PROACTIVE_RETRY_DELAY_MS, nextAttempt));
             }
-            iterator.remove();
             drained++;
         }
+    }
+
+    private long getProactiveDelayMs() {
+        MinecraftClient mc = MinecraftClient.getInstance();
+        if (mc.player == null || mc.getNetworkHandler() == null) return MIN_PROACTIVE_DELAY_MS;
+
+        PlayerListEntry entry = mc.getNetworkHandler().getPlayerListEntry(mc.player.getUuid());
+        int latency = entry == null ? 0 : Math.max(0, entry.getLatency());
+        long delay = latency * 2L + 350L;
+        return Math.max(MIN_PROACTIVE_DELAY_MS, Math.min(MAX_PROACTIVE_DELAY_MS, delay));
     }
 
     private void pruneExpired(long now) {
         recentlyMined.entrySet().removeIf(entry -> now - entry.getValue().minedAt > MEMORY_TTL_MS);
         pendingProactiveVerify.keySet().removeIf(pos -> !recentlyMined.containsKey(pos));
-        lastRepairedAt.entrySet().removeIf(entry -> now - entry.getValue() > MEMORY_TTL_MS);
+        lastVerifiedAt.entrySet().removeIf(entry -> now - entry.getValue() > MEMORY_TTL_MS);
     }
 
     private int chebyshevDistance(BlockPos a, BlockPos b) {
@@ -195,6 +206,9 @@ public class GhostBlockFix extends Module {
         );
     }
 
-    private record MinedBlock(long minedAt, BlockState oldState) {
+    private record MinedBlock(long minedAt) {
+    }
+
+    private record ProactiveVerification(long nextAt, int attempt) {
     }
 }

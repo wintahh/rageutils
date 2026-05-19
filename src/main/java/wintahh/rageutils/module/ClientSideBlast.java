@@ -16,6 +16,9 @@ import net.minecraft.item.Items;
 import net.minecraft.component.DataComponentTypes;
 import net.minecraft.component.type.LoreComponent;
 
+import java.util.ArrayList;
+import java.util.List;
+
 public class ClientSideBlast extends Module {
     public ClientSideBlast() {
         super("ClientSideBlast", "/ru csb");
@@ -73,11 +76,12 @@ public class ClientSideBlast extends Module {
         return held.isSuitableFor(targetState);
     }
 
-    public void onBreakBlock(BlockPos pos, Direction face) {
-        if (!shouldBlast(pos)) return;
+    public List<PredictedBreak> planBreaks(BlockPos pos, Direction face) {
+        List<PredictedBreak> breaks = new ArrayList<>();
+        if (!shouldBlast(pos)) return breaks;
 
         MinecraftClient mc = MinecraftClient.getInstance();
-        if (mc.world == null) return;
+        if (mc.world == null) return breaks;
 
         // get axes perpendicular to hit face
         Direction.Axis faceAxis = face.getAxis();
@@ -90,13 +94,26 @@ public class ClientSideBlast extends Module {
             else axisB = axis;
         }
 
-        // iterate to form the 3x3 of blast
+        // Iterate to form the 3x3 blast, but leave the center to vanilla breakBlock.
         for (int i = -1; i <= 1; i++) {
             for (int j = -1; j <= 1; j++) {
+                if (i == 0 && j == 0) continue;
+
                 BlockPos target = offset(pos, axisA, i, axisB, j);
                 if (!canBlastTarget(target)) continue;
-                mc.world.setBlockState(target, Blocks.AIR.getDefaultState());
+                breaks.add(new PredictedBreak(target.toImmutable(), mc.world.getBlockState(target)));
             }
+        }
+
+        return breaks;
+    }
+
+    public void applyPredictedBreaks(List<PredictedBreak> breaks) {
+        MinecraftClient mc = MinecraftClient.getInstance();
+        if (mc.world == null) return;
+
+        for (PredictedBreak predictedBreak : breaks) {
+            mc.world.setBlockState(predictedBreak.pos(), Blocks.AIR.getDefaultState(), 19);
         }
     }
 
@@ -109,5 +126,8 @@ public class ClientSideBlast extends Module {
         if (axisB == Direction.Axis.X) x += b; else if (axisB == Direction.Axis.Y) y += b; else z += b;
 
         return new BlockPos(x, y, z);
+    }
+
+    public record PredictedBreak(BlockPos pos, BlockState oldState) {
     }
 }
