@@ -11,6 +11,7 @@ import net.minecraft.block.BlockState;
 import net.minecraft.item.ItemStack;
 import net.minecraft.registry.tag.ItemTags;
 import net.minecraft.registry.tag.BlockTags;
+import net.minecraft.block.Blocks;
 import net.minecraft.item.Items;
 
 import net.minecraft.component.DataComponentTypes;
@@ -45,14 +46,20 @@ public class ClientSideBlast extends Module {
             .anyMatch(line -> line.getString().equals("Blast I"));
         if (!hasBlastEnchant) return false;
 
+        BlockState state = mc.world.getBlockState(pos);
+
         // for some reason shears dont work with isSuitable so we're calling them early 
         if (held.getItem() == Items.SHEARS) { 
-            if (mc.world.getBlockState(pos).isIn(BlockTags.WOOL) ||
-                mc.world.getBlockState(pos).isIn(BlockTags.LEAVES)) return true;
+            if (state.isIn(BlockTags.WOOL) ||
+                state.isIn(BlockTags.LEAVES)) return true;
+        }
+        // mushroom technically isnt suitable for hoes, call it early
+        if (state.isOf(Blocks.MUSHROOM_STEM)) {
+            if (held.isIn(ItemTags.HOES)) return true;
+            if (held.isIn(ItemTags.AXES)) return false; // axe is suitable for mushroom stem, but not in ragemines, call it early
         }
 
-        // is it da right tool fo' da job??!?!!?!?
-        BlockState state = mc.world.getBlockState(pos);
+        // unsuitable, others
         if (!held.isSuitableFor(state)) return false;
 
         return true;
@@ -69,6 +76,11 @@ public class ClientSideBlast extends Module {
         if (held.getItem() == Items.SHEARS) {
             return targetState.isIn(BlockTags.WOOL) || targetState.isIn(BlockTags.LEAVES);
         }
+      
+      if (state.isOf(Blocks.MUSHROOM_STEM)) {
+          if (held.isIn(ItemTags.HOES)) return true;
+          if (held.isIn(ItemTags.AXES)) return false; // axe is suitable for mushroom stem, but not in ragemines, call it early
+      }
 
         return held.isSuitableFor(targetState);
     }
