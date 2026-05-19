@@ -86,10 +86,13 @@ public class GhostBlockFix extends Module {
         if (!isEnabled()) return;
 
         MinecraftClient mc = MinecraftClient.getInstance();
-        if (mc.player == null || mc.world == null || mc.getNetworkHandler() == null) return;
+        mc.execute(() -> {
+            if (!isEnabled()) return;
+            if (mc.player == null || mc.world == null || mc.getNetworkHandler() == null) return;
 
-        repairNearbyInvisibleGhosts(mc, before);
-        repairNearbyInvisibleGhosts(mc, BlockPos.ofFloored(after));
+            repairNearbyInvisibleGhosts(mc, before);
+            repairNearbyInvisibleGhosts(mc, BlockPos.ofFloored(after));
+        });
     }
 
     public void toggleProactive() {
