@@ -11,6 +11,7 @@ import net.minecraft.block.BlockState;
 import net.minecraft.item.ItemStack;
 import net.minecraft.registry.tag.ItemTags;
 import net.minecraft.registry.tag.BlockTags;
+import net.minecraft.block.Blocks;
 import net.minecraft.item.Items;
 
 import net.minecraft.component.DataComponentTypes;
@@ -43,17 +44,33 @@ public class ClientSideBlast extends Module {
             .anyMatch(line -> line.getString().equals("Blast I"));
         if (!hasBlastEnchant) return false;
 
+        BlockState state = mc.world.getBlockState(pos);
+
         // for some reason shears dont work with isSuitable so we're calling them early 
         if (held.getItem() == Items.SHEARS) { 
-            if (mc.world.getBlockState(pos).isIn(BlockTags.WOOL) ||
-                mc.world.getBlockState(pos).isIn(BlockTags.LEAVES)) return true;
+            if (state.isIn(BlockTags.WOOL) ||
+                state.isIn(BlockTags.LEAVES)) return true;
+        }
+        // mushroom technically isnt suitable for hoes, call it early
+        if (state.isOf(Blocks.MUSHROOM_STEM)) {
+            if (held.isIn(ItemTags.HOES)) return true;
+            if (held.isIn(ItemTags.AXES)) return false; // axe is suitable for mushroom stem, but not in ragemines, call it early
         }
 
-        // is it da right tool fo' da job??!?!!?!?
-        BlockState state = mc.world.getBlockState(pos);
+        // unsuitable, others
         if (!held.isSuitableFor(state)) return false;
 
         return true;
+    }
+
+    public boolean canBlastTarget(BlockPos target, BlockPos pos) {
+        MinecraftClient mc = MinecraftClient.getInstance();
+        if (mc.player == null || mc.world == null) return false;
+
+        BlockState targetState = mc.world.getBlockState(target);
+        BlockState posState = mc.world.getBlockState(pos);
+
+        return targetState.isOf(posState.getBlock()); // you only blast the same block as you mine, this also skips air
     }
 
     public void onBreakBlock(BlockPos pos, Direction face) {
@@ -78,6 +95,7 @@ public class ClientSideBlast extends Module {
         for (int i = -1; i <= 1; i++) {
             for (int j = -1; j <= 1; j++) {
                 BlockPos target = offset(pos, axisA, i, axisB, j);
+                if (!canBlastTarget(target, pos)) continue;
                 mc.world.setBlockState(target, Blocks.AIR.getDefaultState());
             }
         }
