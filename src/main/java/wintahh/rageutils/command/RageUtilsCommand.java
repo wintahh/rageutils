@@ -60,6 +60,36 @@ public class RageUtilsCommand {
                             RageUtils.RATE_HUD.resetCounters();
                             return 1;
                         })))
+                // ghostblockfix
+                .then(ClientCommandManager.literal("gbf")
+                    .executes(ctx -> {
+                        sendBetaNotice("GhostBlockFix");
+                        RageUtils.GHOST_BLOCK_FIX.toggle();
+                        return 1;
+                    })
+                    .then(ClientCommandManager.literal("proactive")
+                        .executes(ctx -> {
+                            sendBetaNotice("GhostBlockFix proactive");
+                            RageUtils.GHOST_BLOCK_FIX.toggleProactive();
+                            return 1;
+                        })))
+                // snappyinput
+                .then(ClientCommandManager.literal("snap")
+                    .executes(ctx -> {
+                        sendBetaNotice("SnappyInput");
+                        RageUtils.SNAPPY_INPUT.toggle();
+                        return 1;
+                    }))
+        );
+    }
+}
+
+private static void sendBetaNotice(String featureName) {
+    MinecraftClient mc = MinecraftClient.getInstance();
+    if (mc.player != null) {
+        mc.player.sendMessage(
+            Text.literal("§c[RageUtils] §e" + featureName + " is a beta feature."),
+            false
         );
     }
 }

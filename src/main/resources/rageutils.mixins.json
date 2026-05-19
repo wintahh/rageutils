@@ -2,9 +2,10 @@
 	"required": true,
 	"package": "wintahh.rageutils.mixin",
 	"compatibilityLevel": "JAVA_21",
-	"mixins": [],
-	"client": [
-		"ClientPlayerInteractionManagerMixin"
+	"mixins": [
+		"ClientPlayerInteractionManagerMixin",
+		"ClientPlayNetworkHandlerMixin",
+		"SnappyInputMixin"
 	],
 	"injectors": {
 		"defaultRequire": 1
