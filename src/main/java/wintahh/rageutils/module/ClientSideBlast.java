@@ -22,6 +22,8 @@ public class ClientSideBlast extends Module {
     }
 
     public boolean shouldBlast(BlockPos pos) {
+        if (!isEnabled()) return false;
+
         MinecraftClient mc = MinecraftClient.getInstance();
         if (mc.player == null || mc.world == null) return false;
 
@@ -56,8 +58,22 @@ public class ClientSideBlast extends Module {
         return true;
     }
 
+    public boolean canBlastTarget(BlockPos pos) {
+        MinecraftClient mc = MinecraftClient.getInstance();
+        if (mc.player == null || mc.world == null) return false;
+
+        BlockState targetState = mc.world.getBlockState(pos);
+        if (targetState.isAir()) return false;
+
+        ItemStack held = mc.player.getMainHandStack();
+        if (held.getItem() == Items.SHEARS) {
+            return targetState.isIn(BlockTags.WOOL) || targetState.isIn(BlockTags.LEAVES);
+        }
+
+        return held.isSuitableFor(targetState);
+    }
+
     public void onBreakBlock(BlockPos pos, Direction face) {
-        if (!isEnabled()) return;
         if (!shouldBlast(pos)) return;
 
         MinecraftClient mc = MinecraftClient.getInstance();
@@ -78,6 +94,7 @@ public class ClientSideBlast extends Module {
         for (int i = -1; i <= 1; i++) {
             for (int j = -1; j <= 1; j++) {
                 BlockPos target = offset(pos, axisA, i, axisB, j);
+                if (!canBlastTarget(target)) continue;
                 mc.world.setBlockState(target, Blocks.AIR.getDefaultState());
             }
         }
