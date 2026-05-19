@@ -7,7 +7,10 @@ import net.minecraft.sound.BlockSoundGroup;
 import net.minecraft.sound.SoundCategory;
 import net.minecraft.text.Text;
 import net.minecraft.util.Hand;
+import net.minecraft.util.hit.BlockHitResult;
+import net.minecraft.util.hit.HitResult;
 import net.minecraft.util.math.BlockPos;
+import wintahh.rageutils.RageUtils;
 
 public class SnappyInput extends Module {
     private boolean attackPressedLastTick = false;
@@ -39,7 +42,7 @@ public class SnappyInput extends Module {
         }
 
         boolean attackPressed = mc.options.attackKey.isPressed();
-        if (attackPressed && !attackPressedLastTick && !mc.player.handSwinging) {
+        if (attackPressed && !attackPressedLastTick && !mc.player.handSwinging && !shouldDeferToClientSideBlast(mc)) {
             mc.player.swingHand(Hand.MAIN_HAND);
         }
         attackPressedLastTick = attackPressed;
@@ -67,5 +70,13 @@ public class SnappyInput extends Module {
 
     public void onBlockPlacePredicted(BlockPos pos, ItemStack stack) {
         if (!isEnabled()) return;
+    }
+
+    private boolean shouldDeferToClientSideBlast(MinecraftClient mc) {
+        HitResult hit = mc.crosshairTarget;
+        if (hit == null || hit.getType() != HitResult.Type.BLOCK) return false;
+
+        BlockPos pos = ((BlockHitResult) hit).getBlockPos();
+        return RageUtils.CLIENTSIDE_BLAST.shouldBlast(pos);
     }
 }
