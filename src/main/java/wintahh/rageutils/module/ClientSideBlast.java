@@ -77,7 +77,7 @@ public class ClientSideBlast extends Module {
             return targetState.isIn(BlockTags.WOOL) || targetState.isIn(BlockTags.LEAVES);
         }
       
-      if (state.isOf(Blocks.MUSHROOM_STEM)) {
+      if (targetState.isOf(Blocks.MUSHROOM_STEM)) {
           if (held.isIn(ItemTags.HOES)) return true;
           if (held.isIn(ItemTags.AXES)) return false; // axe is suitable for mushroom stem, but not in ragemines, call it early
       }
