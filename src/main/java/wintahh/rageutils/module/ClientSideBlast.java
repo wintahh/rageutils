@@ -2,6 +2,8 @@ package wintahh.rageutils.module;
 
 import net.minecraft.block.Blocks;
 import net.minecraft.client.MinecraftClient;
+import net.minecraft.sound.BlockSoundGroup;
+import net.minecraft.sound.SoundCategory;
 import net.minecraft.text.Text;
 
 import net.minecraft.util.math.BlockPos;
@@ -20,8 +22,21 @@ import java.util.ArrayList;
 import java.util.List;
 
 public class ClientSideBlast extends Module {
+    private boolean soundEnabled = false;
+
     public ClientSideBlast() {
         super("ClientSideBlast", "/ru csb");
+    }
+
+    public void toggleSound() {
+        soundEnabled = !soundEnabled;
+        MinecraftClient mc = MinecraftClient.getInstance();
+        if (mc.player != null) {
+            mc.player.sendMessage(
+                Text.literal("[RageUtils] ClientSideBlast sound: " + (soundEnabled ? "\u00a7aON" : "\u00a7cOFF")),
+                true
+            );
+        }
     }
 
     public boolean shouldBlast(BlockPos pos) {
@@ -112,9 +127,29 @@ public class ClientSideBlast extends Module {
         MinecraftClient mc = MinecraftClient.getInstance();
         if (mc.world == null) return;
 
+        boolean playedSound = false;
         for (PredictedBreak predictedBreak : breaks) {
             mc.world.setBlockState(predictedBreak.pos(), Blocks.AIR.getDefaultState(), 19);
+            if (soundEnabled && !playedSound) {
+                playBreakSound(mc, predictedBreak);
+                playedSound = true;
+            }
         }
+    }
+
+    private void playBreakSound(MinecraftClient mc, PredictedBreak predictedBreak) {
+        BlockSoundGroup soundGroup = predictedBreak.oldState().getSoundGroup();
+        BlockPos pos = predictedBreak.pos();
+        mc.world.playSoundClient(
+            pos.getX() + 0.5,
+            pos.getY() + 0.5,
+            pos.getZ() + 0.5,
+            soundGroup.getBreakSound(),
+            SoundCategory.BLOCKS,
+            (soundGroup.getVolume() + 1.0F) / 2.0F,
+            soundGroup.getPitch() * 0.8F,
+            false
+        );
     }
 
     private BlockPos offset(BlockPos origin, Direction.Axis axisA, int a, Direction.Axis axisB, int b) {

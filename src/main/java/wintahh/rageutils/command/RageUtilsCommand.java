@@ -47,7 +47,12 @@ public class RageUtilsCommand {
                     .executes(ctx -> {
                         RageUtils.CLIENTSIDE_BLAST.toggle();
                         return 1;
-                    }))
+                    })
+                    .then(ClientCommandManager.literal("sound")
+                        .executes(ctx -> {
+                            RageUtils.CLIENTSIDE_BLAST.toggleSound();
+                            return 1;
+                        })))
                 // ratehud
                 .then(ClientCommandManager.literal("rh")
                     .then(ClientCommandManager.literal("mine")

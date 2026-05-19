@@ -17,13 +17,12 @@ import java.util.Map;
 
 public class GhostBlockFix extends Module {
     private static final long MEMORY_TTL_MS = 15_000;
-    private static final long VERIFY_COOLDOWN_MS = 700;
+    private static final long VERIFY_COOLDOWN_MS = 4_000;
+    private static final long GLOBAL_VERIFY_COOLDOWN_MS = 1_250;
     private static final int SEARCH_RADIUS = 2;
-    private static final int MAX_VERIFICATIONS_PER_TICK = 6;
+    private static final int MAX_VERIFICATIONS_PER_TICK = 1;
     private static final long MIN_PROACTIVE_DELAY_MS = 650;
     private static final long MAX_PROACTIVE_DELAY_MS = 2_000;
-    private static final long PROACTIVE_RETRY_DELAY_MS = 900;
-    private static final int MAX_PROACTIVE_ATTEMPTS = 3;
     private static final int MAX_RECENTLY_MINED = 512;
 
     private final Map<BlockPos, MinedBlock> recentlyMined = new LinkedHashMap<>() {
@@ -33,8 +32,9 @@ public class GhostBlockFix extends Module {
         }
     };
     private final Map<BlockPos, Long> lastVerifiedAt = new LinkedHashMap<>();
-    private final Map<BlockPos, ProactiveVerification> pendingProactiveVerify = new LinkedHashMap<>();
+    private final Map<BlockPos, Long> pendingProactiveVerify = new LinkedHashMap<>();
     private boolean proactiveEnabled = false;
+    private long lastAnyVerificationAt = 0;
 
     public GhostBlockFix() {
         super("GhostBlockFix", "/ru gbf");
@@ -54,6 +54,7 @@ public class GhostBlockFix extends Module {
             recentlyMined.clear();
             lastVerifiedAt.clear();
             pendingProactiveVerify.clear();
+            lastAnyVerificationAt = 0;
         }
     }
 
@@ -67,7 +68,7 @@ public class GhostBlockFix extends Module {
 
         long now = System.currentTimeMillis();
         pruneExpired(now);
-        trackMinedBlock(pos, now);
+        trackMinedBlock(pos, now, true);
     }
 
     public void onBlocksBroken(List<ClientSideBlast.PredictedBreak> breaks) {
@@ -77,7 +78,7 @@ public class GhostBlockFix extends Module {
         pruneExpired(now);
         for (ClientSideBlast.PredictedBreak predictedBreak : breaks) {
             if (predictedBreak.oldState() == null || predictedBreak.oldState().isAir()) continue;
-            trackMinedBlock(predictedBreak.pos(), now);
+            trackMinedBlock(predictedBreak.pos(), now, false);
         }
     }
 
@@ -123,11 +124,11 @@ public class GhostBlockFix extends Module {
         }
     }
 
-    private void trackMinedBlock(BlockPos pos, long now) {
+    private void trackMinedBlock(BlockPos pos, long now, boolean allowProactiveVerify) {
         BlockPos immutablePos = pos.toImmutable();
         recentlyMined.put(immutablePos, new MinedBlock(now));
-        if (proactiveEnabled) {
-            pendingProactiveVerify.put(immutablePos, new ProactiveVerification(now + getProactiveDelayMs(), 0));
+        if (proactiveEnabled && allowProactiveVerify) {
+            pendingProactiveVerify.put(immutablePos, now + getProactiveDelayMs());
         }
     }
 
@@ -148,6 +149,8 @@ public class GhostBlockFix extends Module {
         if (net == null) return false;
 
         long now = System.currentTimeMillis();
+        if (now - lastAnyVerificationAt < GLOBAL_VERIFY_COOLDOWN_MS) return false;
+
         Long lastVerified = lastVerifiedAt.get(pos);
         if (lastVerified != null && now - lastVerified < VERIFY_COOLDOWN_MS) return false;
 
@@ -159,6 +162,7 @@ public class GhostBlockFix extends Module {
             PlayerActionC2SPacket.Action.ABORT_DESTROY_BLOCK, pos, face
         ));
         lastVerifiedAt.put(pos.toImmutable(), now);
+        lastAnyVerificationAt = now;
         return true;
     }
 
@@ -166,19 +170,13 @@ public class GhostBlockFix extends Module {
         if (!proactiveEnabled) return;
 
         int drained = 0;
-        Iterator<Map.Entry<BlockPos, ProactiveVerification>> iterator = pendingProactiveVerify.entrySet().iterator();
+        Iterator<Map.Entry<BlockPos, Long>> iterator = pendingProactiveVerify.entrySet().iterator();
         while (iterator.hasNext() && drained < MAX_VERIFICATIONS_PER_TICK) {
-            Map.Entry<BlockPos, ProactiveVerification> entry = iterator.next();
-            ProactiveVerification verification = entry.getValue();
-            if (verification.nextAt > now) continue;
+            Map.Entry<BlockPos, Long> entry = iterator.next();
+            if (entry.getValue() > now) continue;
 
             sendVerificationPacket(mc, entry.getKey());
-            int nextAttempt = verification.attempt + 1;
-            if (nextAttempt >= MAX_PROACTIVE_ATTEMPTS || !recentlyMined.containsKey(entry.getKey())) {
-                iterator.remove();
-            } else {
-                entry.setValue(new ProactiveVerification(now + PROACTIVE_RETRY_DELAY_MS, nextAttempt));
-            }
+            iterator.remove();
             drained++;
         }
     }
@@ -207,8 +205,5 @@ public class GhostBlockFix extends Module {
     }
 
     private record MinedBlock(long minedAt) {
-    }
-
-    private record ProactiveVerification(long nextAt, int attempt) {
     }
 }
