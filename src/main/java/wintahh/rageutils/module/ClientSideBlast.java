@@ -8,6 +8,7 @@ import net.minecraft.text.Text;
 
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.Direction;
+import net.minecraft.util.math.Vec3d;
 
 import net.minecraft.block.BlockState;
 import net.minecraft.item.ItemStack;
@@ -98,8 +99,7 @@ public class ClientSideBlast extends Module {
         MinecraftClient mc = MinecraftClient.getInstance();
         if (mc.world == null) return breaks;
 
-        // get axes perpendicular to hit face
-        Direction.Axis faceAxis = face.getAxis();
+        Direction.Axis faceAxis = getBlastAxis(mc, face);
 
         Direction.Axis axisA = null;
         Direction.Axis axisB = null;
@@ -150,6 +150,19 @@ public class ClientSideBlast extends Module {
             soundGroup.getPitch() * 0.8F,
             false
         );
+    }
+
+    private Direction.Axis getBlastAxis(MinecraftClient mc, Direction fallbackFace) {
+        if (mc.player == null) return fallbackFace.getAxis();
+
+        Vec3d look = mc.player.getRotationVec(1.0F);
+        double x = Math.abs(look.x);
+        double y = Math.abs(look.y);
+        double z = Math.abs(look.z);
+
+        if (y >= x && y >= z) return Direction.Axis.Y;
+        if (x >= z) return Direction.Axis.X;
+        return Direction.Axis.Z;
     }
 
     private BlockPos offset(BlockPos origin, Direction.Axis axisA, int a, Direction.Axis axisB, int b) {
