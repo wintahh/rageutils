@@ -94,7 +94,6 @@ public class ClientSideBlast extends Module {
         // iterate to form the 3x3 of blast
         for (int i = -1; i <= 1; i++) {
             for (int j = -1; j <= 1; j++) {
-                if (i == 0 && j == 0) continue; // dont set air the block broken by player
                 BlockPos target = offset(pos, axisA, i, axisB, j);
                 if (!canBlastTarget(target, pos)) continue;
                 mc.world.setBlockState(target, Blocks.AIR.getDefaultState());
