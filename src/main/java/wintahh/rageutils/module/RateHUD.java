@@ -104,7 +104,7 @@ public class RateHUD extends Module {
                 for (int j = -1; j <= 1; j++) {
                     if (i == 0 && j == 0) continue; // center already counted above
                     BlockPos target = offsetPos(pos, axisA, i, axisB, j);
-                    if (RageUtils.CLIENTSIDE_BLAST.canBlastTarget(target)) {
+                    if (RageUtils.CLIENTSIDE_BLAST.canBlastTarget(target, pos)) {
                         totalBlocksBroken++;
                     }
                 }
