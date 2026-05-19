@@ -5,7 +5,8 @@
 	"name": "RageUtils",
 	"description": "Quality of Life mod for RageMines",
 	"authors": [
-		"wintahh"
+		"wintahh",
+		"Qav45"
 	],
 	"license": "CC0-1.0",
 	"icon": "assets/rageutils/icon.png",
