@@ -24,6 +24,7 @@ public abstract class Module {
         }
     }
 
+    protected void setEnabled(boolean enabled) { this.enabled = enabled; }
     public boolean isEnabled() { return enabled; }
     public String getName() { return name; }
     public String getCommand() { return command; }
