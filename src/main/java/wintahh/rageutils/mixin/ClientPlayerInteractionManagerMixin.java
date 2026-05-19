@@ -24,19 +24,38 @@ public class ClientPlayerInteractionManagerMixin {
     private BlockState rageutils$oldBreakState;
     @Unique
     private List<ClientSideBlast.PredictedBreak> rageutils$plannedBlastBreaks = Collections.emptyList();
+    @Unique
+    private BlockPos rageutils$attackedPos;
+    @Unique
+    private Direction rageutils$attackedFace;
+
+    // Capture the face at mining-start so the blast plane survives crosshair drift.
+    @Inject(method = "attackBlock", at = @At("HEAD"))
+    private void rageutils$onAttackBlock(BlockPos pos, Direction direction, CallbackInfoReturnable<Boolean> cir) {
+        rageutils$attackedPos = pos.toImmutable();
+        rageutils$attackedFace = direction;
+    }
 
     // at = @At("HEAD")) on le capte avant qu'il soit envoyer au serv.
     @Inject(method = "breakBlock", at = @At("HEAD"))
     private void onBreakBlock(BlockPos pos, CallbackInfoReturnable<Boolean> cir) {
         MinecraftClient mc = MinecraftClient.getInstance();
-        HitResult hit = mc.crosshairTarget;
         rageutils$oldBreakState = null;
         rageutils$plannedBlastBreaks = Collections.emptyList();
-        if (hit == null || hit.getType() != HitResult.Type.BLOCK) return;
+
+        Direction face = null;
+        if (rageutils$attackedPos != null && rageutils$attackedPos.equals(pos) && rageutils$attackedFace != null) {
+            face = rageutils$attackedFace;
+        } else {
+            HitResult hit = mc.crosshairTarget;
+            if (hit != null && hit.getType() == HitResult.Type.BLOCK) {
+                face = ((BlockHitResult) hit).getSide();
+            }
+        }
+        if (face == null) return;
 
         BlockState oldState = mc.world == null ? null : mc.world.getBlockState(pos);
         rageutils$oldBreakState = oldState;
-        Direction face = ((BlockHitResult) hit).getSide();
         rageutils$plannedBlastBreaks = RageUtils.CLIENTSIDE_BLAST.planBreaks(pos, face);
     }
 
@@ -59,5 +78,7 @@ public class ClientPlayerInteractionManagerMixin {
     private void rageutils$clearBreakPrediction() {
         rageutils$oldBreakState = null;
         rageutils$plannedBlastBreaks = Collections.emptyList();
+        rageutils$attackedPos = null;
+        rageutils$attackedFace = null;
     }
 }
