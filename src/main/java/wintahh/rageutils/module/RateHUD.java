@@ -80,8 +80,9 @@ public class RateHUD extends Module {
 
     public void onBlockBroken(BlockPos pos, Direction face) {
         if (!miningEnabled) return;
-        if (startTime == 0) startTime = System.currentTimeMillis();
-        lastBreakTime = System.currentTimeMillis();
+        long now = System.currentTimeMillis();
+        if (startTime == 0) startTime = now;
+        lastBreakTime = now;
 
         MinecraftClient mc = MinecraftClient.getInstance();
         if (mc.world == null) return;
@@ -110,6 +111,15 @@ public class RateHUD extends Module {
                 }
             }
         }
+    }
+
+    public void onBlocksBroken(int blockCount) {
+        if (!miningEnabled || blockCount <= 0) return;
+
+        long now = System.currentTimeMillis();
+        if (startTime == 0) startTime = now;
+        lastBreakTime = now;
+        totalBlocksBroken += blockCount;
     }
 
     private BlockPos offsetPos(BlockPos origin, Direction.Axis axisA, int a, Direction.Axis axisB, int b) {

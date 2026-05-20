@@ -2,6 +2,8 @@ package wintahh.rageutils.module;
 
 import net.minecraft.block.Blocks;
 import net.minecraft.client.MinecraftClient;
+import net.minecraft.sound.BlockSoundGroup;
+import net.minecraft.sound.SoundCategory;
 import net.minecraft.text.Text;
 
 import net.minecraft.util.math.BlockPos;
@@ -17,9 +19,25 @@ import net.minecraft.item.Items;
 import net.minecraft.component.DataComponentTypes;
 import net.minecraft.component.type.LoreComponent;
 
+import java.util.ArrayList;
+import java.util.List;
+
 public class ClientSideBlast extends Module {
+    private boolean soundEnabled = false;
+
     public ClientSideBlast() {
         super("ClientSideBlast", "/ru csb");
+    }
+
+    public void toggleSound() {
+        soundEnabled = !soundEnabled;
+        MinecraftClient mc = MinecraftClient.getInstance();
+        if (mc.player != null) {
+            mc.player.sendMessage(
+                Text.literal("[RageUtils] ClientSideBlast sound: " + (soundEnabled ? "\u00a7aON" : "\u00a7cOFF")),
+                true
+            );
+        }
     }
 
     public boolean shouldBlast(BlockPos pos) {
@@ -85,13 +103,13 @@ public class ClientSideBlast extends Module {
         return held.isSuitableFor(targetState);
     }
 
-    public void onBreakBlock(BlockPos pos, Direction face) {
-        if (!shouldBlast(pos)) return;
+    public List<PredictedBreak> planBreaks(BlockPos pos, Direction face) {
+        List<PredictedBreak> breaks = new ArrayList<>();
+        if (!shouldBlast(pos)) return breaks;
 
         MinecraftClient mc = MinecraftClient.getInstance();
-        if (mc.world == null) return;
+        if (mc.world == null) return breaks;
 
-        // get axes perpendicular to hit face
         Direction.Axis faceAxis = face.getAxis();
 
         Direction.Axis axisA = null;
@@ -102,14 +120,47 @@ public class ClientSideBlast extends Module {
             else axisB = axis;
         }
 
-        // iterate to form the 3x3 of blast
+        // Iterate to form the 3x3 blast, but leave the center to vanilla breakBlock.
         for (int i = -1; i <= 1; i++) {
             for (int j = -1; j <= 1; j++) {
+                if (i == 0 && j == 0) continue;
+
                 BlockPos target = offset(pos, axisA, i, axisB, j);
                 if (!canBlastTarget(target)) continue;
-                mc.world.setBlockState(target, Blocks.AIR.getDefaultState());
+                breaks.add(new PredictedBreak(target.toImmutable(), mc.world.getBlockState(target)));
             }
         }
+
+        return breaks;
+    }
+
+    public void applyPredictedBreaks(List<PredictedBreak> breaks) {
+        MinecraftClient mc = MinecraftClient.getInstance();
+        if (mc.world == null) return;
+
+        boolean playedSound = false;
+        for (PredictedBreak predictedBreak : breaks) {
+            mc.world.setBlockState(predictedBreak.pos(), Blocks.AIR.getDefaultState(), 19);
+            if (soundEnabled && !playedSound) {
+                playBreakSound(mc, predictedBreak);
+                playedSound = true;
+            }
+        }
+    }
+
+    private void playBreakSound(MinecraftClient mc, PredictedBreak predictedBreak) {
+        BlockSoundGroup soundGroup = predictedBreak.oldState().getSoundGroup();
+        BlockPos pos = predictedBreak.pos();
+        mc.world.playSoundClient(
+            pos.getX() + 0.5,
+            pos.getY() + 0.5,
+            pos.getZ() + 0.5,
+            soundGroup.getBreakSound(),
+            SoundCategory.BLOCKS,
+            (soundGroup.getVolume() + 1.0F) / 2.0F,
+            soundGroup.getPitch() * 0.8F,
+            false
+        );
     }
 
     private BlockPos offset(BlockPos origin, Direction.Axis axisA, int a, Direction.Axis axisB, int b) {
@@ -121,5 +172,8 @@ public class ClientSideBlast extends Module {
         if (axisB == Direction.Axis.X) x += b; else if (axisB == Direction.Axis.Y) y += b; else z += b;
 
         return new BlockPos(x, y, z);
+    }
+
+    public record PredictedBreak(BlockPos pos, BlockState oldState) {
     }
 }
