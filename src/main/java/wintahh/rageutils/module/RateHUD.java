@@ -1,5 +1,5 @@
 package wintahh.rageutils.module;
-
+ 
 import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents;
 import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.font.TextRenderer;
@@ -9,20 +9,24 @@ import net.minecraft.text.Text;
 import net.minecraft.util.math.Direction;
 import net.minecraft.util.math.BlockPos;
 import wintahh.rageutils.RageUtils;
-
+ 
 import java.util.Locale;
 import java.util.*;
-
+ 
 public class RateHUD extends Module {
-
+ 
+    // -------------------------------------------------------------------------
+    // Resource Type
+    // -------------------------------------------------------------------------
+ 
     public static class ResourceType {
         public final String name;
         public final int color;
         public final long compressedValue;
-        public final long superCompressedValue; // 0 = unavailable
-        public final long ultraCompressedValue; // 0 = unavailable
+        public final long superCompressedValue;
+        public final long ultraCompressedValue;
         public long totalUnits = 0;
-
+ 
         public ResourceType(String name, int color, long compressed, long superCompressed, long ultraCompressed) {
             this.name = name;
             this.color = color;
@@ -30,10 +34,8 @@ public class RateHUD extends Module {
             this.superCompressedValue = superCompressed;
             this.ultraCompressedValue = ultraCompressed;
         }
-
-        // Returns how many base units the given item name + count represents
+ 
         public long getValueForItemName(String displayName, int count) {
-            // Check most compressed first to avoid substring false-matches
             if (ultraCompressedValue > 0 && displayName.equals("Ultra Compressed " + name))
                 return ultraCompressedValue * count;
             if (superCompressedValue > 0 && displayName.equals("Super Compressed " + name))
@@ -44,19 +46,19 @@ public class RateHUD extends Module {
                 return count;
             return 0;
         }
-
+ 
         public void reset() { totalUnits = 0; }
-
+ 
         public Text getDisplayName() {
             return Text.literal(name).styled(s -> s.withBold(true).withColor(color));
         }
-
+ 
         public String getMaxCompressionName() {
             if (ultraCompressedValue > 0) return "UC";
             if (superCompressedValue > 0) return "SC";
-            return "Comp.";
+            return "Comp";
         }
-
+ 
         public long getMaxCompressionValue() {
             if (ultraCompressedValue > 0) return ultraCompressedValue;
             if (superCompressedValue > 0) return superCompressedValue;
@@ -69,90 +71,201 @@ public class RateHUD extends Module {
         TOP_RIGHT("top-right"),
         BOTTOM_LEFT("bottom-left"),
         BOTTOM_RIGHT("bottom-right");
-
+ 
         public final String label;
-
-        Anchor(String label) {
-            this.label = label;
-        }
+        Anchor(String label) { this.label = label; }
     }
-
+ 
+    private static final long WINDOW_MS = 30_000;
+ 
     private boolean miningEnabled = false;
     private Anchor anchor = Anchor.TOP_LEFT;
+    private boolean screenOpenLastTick = false;
+ 
     private final Map<String, Long> previousBaseUnits = new HashMap<>();
     private final List<ResourceType> resources = new ArrayList<>();
-
-    private long totalBlocksBroken = 0;
+ 
+    // Rolling window data
+    private final Deque<long[]> blockBreakEvents = new ArrayDeque<>();           // [timestamp, blockCount]
+    private final Map<String, Deque<long[]>> resourceTimestamps = new HashMap<>(); // [timestamp, units]
+ 
+    // Auto-swap: always show most recently collected resource
+    private ResourceType lastCollectedResource = null;
+ 
+    // Timing
     private long startTime = 0;
     private long lastBreakTime = 0;
-
-    private long pausedDuration = 0;
-    private long pauseStart = 0;
+ 
+    // HUD display cache (updated every tick)
     private ResourceType displayResource = null;
     private String displayBlocksPerHour = "0";
-    private String displayCompressionPrefix = "Comp.";
+    private String displayCompressionPrefix = "Comp";
     private double displayCompressionPerHour = 0;
     private double displayCompressionMined = 0;
     private boolean displayPaused = false;
-
+ 
     public RateHUD() {
         super("RateHUD", "/ru rh");
         initResources();
     }
 
+ 
     public void onBlockBroken(BlockPos pos, Direction face) {
         if (!miningEnabled) return;
         long now = System.currentTimeMillis();
         if (startTime == 0) startTime = now;
         lastBreakTime = now;
-
+ 
+        int count = 1;
+ 
         MinecraftClient mc = MinecraftClient.getInstance();
-        if (mc.world == null) return;
-
-        // always count the directly broken block
-        totalBlocksBroken++;
-
-        // if blast would trigger
-        if (face != null && RageUtils.CLIENTSIDE_BLAST.isEnabled() && RageUtils.CLIENTSIDE_BLAST.shouldBlast(pos)) {
+        if (mc.world != null && face != null) {
             Direction.Axis faceAxis = face.getAxis();
-            Direction.Axis axisA = null;
-            Direction.Axis axisB = null;
+            Direction.Axis axisA = null, axisB = null;
             for (Direction.Axis axis : Direction.Axis.VALUES) {
                 if (axis == faceAxis) continue;
                 if (axisA == null) axisA = axis;
                 else axisB = axis;
             }
-            // iterate over surrounding blocks to see which ones arent air
             for (int i = -1; i <= 1; i++) {
                 for (int j = -1; j <= 1; j++) {
-                    if (i == 0 && j == 0) continue; // center already counted above
+                    if (i == 0 && j == 0) continue;
                     BlockPos target = offsetPos(pos, axisA, i, axisB, j);
-                    if (RageUtils.CLIENTSIDE_BLAST.canBlastTarget(target)) {
-                        totalBlocksBroken++;
-                    }
+                    if (RageUtils.CLIENTSIDE_BLAST.canBlastTarget(target)) count++;
                 }
             }
         }
+ 
+        blockBreakEvents.addLast(new long[]{now, count});
     }
-
+ 
     public void onBlocksBroken(int blockCount) {
         if (!miningEnabled || blockCount <= 0) return;
-
         long now = System.currentTimeMillis();
         if (startTime == 0) startTime = now;
         lastBreakTime = now;
-        totalBlocksBroken += blockCount;
+        blockBreakEvents.addLast(new long[]{now, blockCount});
     }
-
+ 
     private BlockPos offsetPos(BlockPos origin, Direction.Axis axisA, int a, Direction.Axis axisB, int b) {
         int x = origin.getX(), y = origin.getY(), z = origin.getZ();
         if (axisA == Direction.Axis.X) x += a; else if (axisA == Direction.Axis.Y) y += a; else z += a;
         if (axisB == Direction.Axis.X) x += b; else if (axisB == Direction.Axis.Y) y += b; else z += b;
         return new BlockPos(x, y, z);
     }
-
+ 
+    public boolean isMiningEnabled() { return miningEnabled; }
+ 
+    public void toggleMining() {
+        miningEnabled = !miningEnabled;
+        resetCounters();
+        MinecraftClient mc = MinecraftClient.getInstance();
+        if (mc.player != null) {
+            mc.player.sendMessage(
+                Text.literal("[RageUtils] RateHUD Mining: " + (miningEnabled ? "§aON" : "§cOFF")),
+                false
+            );
+        }
+    }
+ 
+    public void setAnchor(Anchor anchor) {
+        this.anchor = anchor;
+        MinecraftClient mc = MinecraftClient.getInstance();
+        if (mc.player != null) {
+            mc.player.sendMessage(
+                Text.literal("[RageUtils] RateHUD anchor: §e" + anchor.label),
+                true
+            );
+        }
+    }
+ 
+    public void resetCounters() {
+        resources.forEach(ResourceType::reset);
+        blockBreakEvents.clear();
+        resourceTimestamps.clear();
+        lastCollectedResource = null;
+        startTime = 0;
+        lastBreakTime = System.currentTimeMillis();
+        screenOpenLastTick = false;
+        previousBaseUnits.clear();
+        clearDisplayStats();
+        MinecraftClient mc = MinecraftClient.getInstance();
+        if (mc.player != null) {
+            previousBaseUnits.putAll(getBaseUnitSnapshot(mc));
+        }
+    }
+ 
+    // -------------------------------------------------------------------------
+    // Inventory Tracking
+    // -------------------------------------------------------------------------
+ 
+    private Map<String, Long> getBaseUnitSnapshot(MinecraftClient mc) {
+        Map<String, Long> snapshot = new HashMap<>();
+        for (int i = 0; i < mc.player.getInventory().size(); i++) {
+            ItemStack stack = mc.player.getInventory().getStack(i);
+            if (stack.isEmpty()) continue;
+            String displayName = stack.getName().getString();
+            for (ResourceType resource : resources) {
+                long value = resource.getValueForItemName(displayName, stack.getCount());
+                if (value > 0) {
+                    snapshot.merge(resource.name, value, Long::sum);
+                    break;
+                }
+            }
+        }
+ 
+        // Include cursor stack to avoid false deltas from inventory rearrangement
+        if (mc.player.currentScreenHandler != null) {
+            ItemStack cursor = mc.player.currentScreenHandler.getCursorStack();
+            if (!cursor.isEmpty()) {
+                String displayName = cursor.getName().getString();
+                for (ResourceType resource : resources) {
+                    long value = resource.getValueForItemName(displayName, cursor.getCount());
+                    if (value > 0) {
+                        snapshot.merge(resource.name, value, Long::sum);
+                        break;
+                    }
+                }
+            }
+        }
+ 
+        return snapshot;
+    }
+ 
+    private void processDelta(Map<String, Long> current) {
+        long now = System.currentTimeMillis();
+        for (ResourceType resource : resources) {
+            long currentUnits  = current.getOrDefault(resource.name, 0L);
+            long previousUnits = previousBaseUnits.getOrDefault(resource.name, 0L);
+            long delta = currentUnits - previousUnits;
+            if (delta > 0) {
+                resource.totalUnits += delta;
+                // Auto-swap: if resource changed, reset the rolling window
+                if (lastCollectedResource != resource) {
+                    blockBreakEvents.clear();
+                    resourceTimestamps.clear();
+                    startTime = now;
+                    lastBreakTime = now;
+                }
+                lastCollectedResource = resource;
+                resourceTimestamps.computeIfAbsent(resource.name, k -> new ArrayDeque<>())
+                    .addLast(new long[]{now, delta});
+            }
+        }
+    }
+ 
+    private ResourceType getTopResource() {
+        return resources.stream()
+            .filter(r -> r.totalUnits > 0)
+            .max(Comparator.comparingLong(r -> r.totalUnits))
+            .orElse(null);
+    }
+ 
+    // -------------------------------------------------------------------------
+    // Resource Definitions
+    // -------------------------------------------------------------------------
+ 
     private void initResources() {
-        // --- Group 1: compressed=64, super=4096 ---
         r("Oak Wood",       0x9e512c, 64,  0,     0);
         r("Loam Soil",      0x4b3d38, 64,  0,     0);
         r("Peat",           0x5f3a1f, 64,  0,     0);
@@ -177,8 +290,7 @@ public class RateHUD extends Module {
         r("Cherry Sand",    0xeda3a8, 64,  4096,  0);
         r("Spirit Clay",    0x9c5b75, 64,  4096,  0);
         r("Pink Petal",     0xfc949e, 64,  4096,  0);
-
-        // --- Group 2: compressed=128, super=16384 ---
+ 
         r("Snow",             0xf4f4f4, 128, 16384, 0);
         r("Snowpack",         0xeaeaea, 128, 16384, 0);
         r("Ice Wool",         0x39add6, 128, 16384, 0);
@@ -195,8 +307,7 @@ public class RateHUD extends Module {
         r("Ancient Debris",   0x39291f, 128, 16384, 0);
         r("Hellplate",        0x8f4747, 128, 16384, 0);
         r("Bloodplate",       0xbe382a, 128, 16384, 0);
-
-        // --- Group 3: compressed=64, super=4096, ultra=262144 ---
+ 
         r("Mycelium",         0xe5ded3, 64,  4096,  0);
         r("Aether Wood",      0xe3d0a1, 64,  4096,  262144);
         r("Celestone",        0xf1eee9, 64,  4096,  262144);
@@ -219,8 +330,7 @@ public class RateHUD extends Module {
         r("Seastone",         0x62c5b0, 64,  4096,  262144);
         r("Deepstone",        0x274d4a, 64,  4096,  262144);
         r("Aqualith",         0x68cee4, 64,  4096,  262144);
-
-        // --- Group 4: compressed=128, super=16384, ultra=2097152 ---
+ 
         r("Sandstone",  0xd6c68c, 128, 16384, 2097152);
         r("Straw",      0xc7a027, 128, 16384, 2097152);
         r("Amber",      0xdd6001, 128, 16384, 2097152);
@@ -228,190 +338,135 @@ public class RateHUD extends Module {
         r("Relic",      0x6a1d0c, 128, 16384, 2097152);
         r("Flareon",    0xd6683b, 128, 16384, 2097152);
     }
-
+ 
     private void r(String name, int color, long c, long s, long u) {
         resources.add(new ResourceType(name, color, c, s, u));
     }
-
-    public boolean isMiningEnabled() { return miningEnabled; }
-
-    public void toggleMining() {
-        miningEnabled = !miningEnabled;
-        resetCounters();
-        MinecraftClient mc = MinecraftClient.getInstance();
-        if (mc.player != null) {
-            mc.player.sendMessage(
-                Text.literal("[RageUtils] RateHUD Mining: " + (miningEnabled ? "\u00a7aON" : "\u00a7cOFF")),
-                false
-            );
-        }
-    }
-
-    public void setAnchor(Anchor anchor) {
-        this.anchor = anchor;
-        MinecraftClient mc = MinecraftClient.getInstance();
-        if (mc.player != null) {
-            mc.player.sendMessage(
-                Text.literal("[RageUtils] RateHUD anchor: §e" + anchor.label),
-                true
-            );
-        }
-    }
-
-    public void resetCounters() {
-        resources.forEach(ResourceType::reset);
-        totalBlocksBroken = 0;
-        startTime = 0;
-        pausedDuration = 0;
-        pauseStart = 0;
-        lastBreakTime = System.currentTimeMillis();
-        screenOpenLastTick = false;
-        previousBaseUnits.clear();
-        clearDisplayStats();
-        MinecraftClient mc = MinecraftClient.getInstance();
-        if (mc.player != null) {
-            previousBaseUnits.putAll(getBaseUnitSnapshot(mc));
-        }
-    }
-
-    // inventory tracking
-
-    private Map<String, Long> getBaseUnitSnapshot(MinecraftClient mc) {
-        Map<String, Long> snapshot = new HashMap<>();
-        for (int i = 0; i < mc.player.getInventory().size(); i++) {
-            ItemStack stack = mc.player.getInventory().getStack(i);
-            if (stack.isEmpty()) continue;
-            String displayName = stack.getName().getString();
-            for (ResourceType resource : resources) {
-                long value = resource.getValueForItemName(displayName, stack.getCount());
-                if (value > 0) {
-                    snapshot.merge(resource.name, value, Long::sum);
-                    break;
-                }
-            }
-        }
-        return snapshot;
-    }
-
-    private void processDelta(Map<String, Long> current) { // handle compression
-        for (ResourceType resource : resources) {
-            long currentUnits = current.getOrDefault(resource.name, 0L);
-            long previousUnits = previousBaseUnits.getOrDefault(resource.name, 0L);
-            long delta = currentUnits - previousUnits;
-            if (delta > 0) resource.totalUnits += delta;
-        }
-    }
-
-    private ResourceType getTopResource() {
-        return resources.stream()
-            .filter(r -> r.totalUnits > 0)
-            .max(Comparator.comparingLong(r -> r.totalUnits))
-            .orElse(null);
-    }
-
-    // main loop
-
+ 
+    // -------------------------------------------------------------------------
+    // Events
+    // -------------------------------------------------------------------------
+ 
     public void registerEvents() {
         ClientTickEvents.END_CLIENT_TICK.register(client -> {
             if (!miningEnabled || client.player == null || client.world == null) {
                 clearDisplayStats();
                 return;
             }
-
+ 
             if (client.currentScreen != null) {
                 screenOpenLastTick = true;
                 return;
             }
-
             if (screenOpenLastTick) {
                 previousBaseUnits.clear();
                 previousBaseUnits.putAll(getBaseUnitSnapshot(client));
                 screenOpenLastTick = false;
                 return;
             }
-
+ 
             Map<String, Long> current = getBaseUnitSnapshot(client);
             processDelta(current);
             previousBaseUnits.clear();
             previousBaseUnits.putAll(current);
-
-            ResourceType top = getTopResource();
+ 
+            ResourceType top = lastCollectedResource != null ? lastCollectedResource : getTopResource();
             if (top == null || startTime == 0) {
                 clearDisplayStats();
                 return;
             }
-
+ 
             long now = System.currentTimeMillis();
+            long windowStart = now - WINDOW_MS;
             boolean isPaused = (now - lastBreakTime) > 3000;
-
-            if (isPaused) {
-                if (pauseStart == 0) pauseStart = lastBreakTime + 3000;
-            } else {
-                if (pauseStart > 0) {
-                    pausedDuration += now - pauseStart;
-                    pauseStart = 0;
-                }
+ 
+            // --- Blocks/h (rolling window) ---
+            while (!blockBreakEvents.isEmpty() && blockBreakEvents.peekFirst()[0] < windowStart)
+                blockBreakEvents.pollFirst();
+            long blocksInWindow = 0;
+            for (long[] e : blockBreakEvents) blocksInWindow += e[1];
+ 
+            // --- UC/h (rolling window) ---
+            Deque<long[]> resEvents = resourceTimestamps.get(top.name);
+            long unitsInWindow = 0;
+            if (resEvents != null) {
+                while (!resEvents.isEmpty() && resEvents.peekFirst()[0] < windowStart)
+                    resEvents.pollFirst();
+                for (long[] e : resEvents) unitsInWindow += e[1];
             }
-
-            long activeDuration = now - startTime - pausedDuration - (isPaused ? now - pauseStart : 0);
-            double elapsedHours = activeDuration / 3600000.0;
-
-            double blocksPerHour = elapsedHours > 0 ? totalBlocksBroken / elapsedHours : 0;
+ 
+            // Use actual elapsed time so rates are accurate from the first block
+            long actualWindowMs = Math.min(now - startTime, WINDOW_MS);
+            if (actualWindowMs <= 0) {
+                clearDisplayStats();
+                return;
+            }
+            double windowSeconds = actualWindowMs / 1000.0;
+ 
+            double blocksPerHour = blocksInWindow * (3600.0 / windowSeconds);
+            double maxCompPerHour = (unitsInWindow / (double) top.getMaxCompressionValue()) * (3600.0 / windowSeconds);
+            double maxCompMined = (double) top.totalUnits / top.getMaxCompressionValue();
+ 
             String blocksPerHourStr;
             if (blocksPerHour >= 100_000) {
                 blocksPerHourStr = String.format(Locale.ROOT, "%.0fk", blocksPerHour / 1000);
             } else {
                 blocksPerHourStr = String.format(Locale.ROOT, "%.0f", blocksPerHour);
             }
-            double maxCompCount = (double) top.totalUnits / top.getMaxCompressionValue();
-            double maxCompPerHour = elapsedHours > 0 ? maxCompCount / elapsedHours : 0;
-            String maxPrefix = top.getMaxCompressionName();
-
+ 
             displayResource = top;
             displayBlocksPerHour = blocksPerHourStr;
-            displayCompressionPrefix = maxPrefix;
+            displayCompressionPrefix = top.getMaxCompressionName();
             displayCompressionPerHour = maxCompPerHour;
-            displayCompressionMined = maxCompCount;
+            displayCompressionMined = maxCompMined;
             displayPaused = isPaused;
-
         });
     }
-
+ 
+    // -------------------------------------------------------------------------
+    // HUD Rendering
+    // -------------------------------------------------------------------------
+ 
     public void renderHud(DrawContext context) {
         if (!miningEnabled) return;
-
+ 
         MinecraftClient mc = MinecraftClient.getInstance();
         if (mc.player == null || mc.options.hudHidden) return;
-
+ 
         TextRenderer textRenderer = mc.textRenderer;
         int padding = 5;
         int lineHeight = 10;
-        int titleColor = 0xfffff04b;
+        int titleYellow = 0xfffff04b;
+        int grayBar = 0xffa8a8a8;
         int labelColor = 0xffffffff;
         int valueColor = 0xff55ff55;
         int mutedColor = 0xffa8a8a8;
-
-        String title = "RageUtils Rate Tracker";
+ 
         String resourceName = displayResource == null ? "Waiting for drops" : displayResource.name;
         int resourceColor = displayResource == null ? mutedColor : (0xff000000 | displayResource.color);
+        
         String compRateLine = String.format(Locale.ROOT, "%.2f", displayCompressionPerHour);
         String compMinedLine = String.format(Locale.ROOT, "%.2f", displayCompressionMined);
         String statusLine = displayPaused ? "PAUSED" : "ACTIVE";
-
+ 
         String compRateLabel = displayCompressionPrefix + "/h";
-        String compMinedLabel = displayCompressionPrefix + " mined";
-        String[] labels = {"Resource", "Blocks/h", compRateLabel, compMinedLabel, "Status"};
-        String[] values = {resourceName, displayBlocksPerHour, compRateLine, compMinedLine, statusLine};
-
+        String compMinedLabel = displayCompressionPrefix + " Mined";
+        
+        String[] labels = {"Blocks/h", compRateLabel, compMinedLabel, "Status"};
+        String[] values = {displayBlocksPerHour, compRateLine, compMinedLine, statusLine};
+ 
         int labelWidth = 0;
         int valueWidth = 0;
         for (String label : labels) labelWidth = Math.max(labelWidth, textRenderer.getWidth(label));
         for (String value : values) valueWidth = Math.max(valueWidth, textRenderer.getWidth(value));
-
+ 
         int gap = 12;
-        int width = Math.max(textRenderer.getWidth(title), labelWidth + gap + valueWidth) + padding * 2;
+        
+        // Dynamic box sizing calculations for split-rendering the header row safely
+        int fullTitleWidth = textRenderer.getWidth("RateHUD ") + textRenderer.getWidth("| ") + textRenderer.getWidth(resourceName);
+        int width = Math.max(fullTitleWidth, labelWidth + gap + valueWidth) + padding * 2;
         int height = padding * 2 + lineHeight * (labels.length + 1);
-
+ 
         int margin = 8;
         int screenWidth = context.getScaledWindowWidth();
         int screenHeight = context.getScaledWindowHeight();
@@ -423,29 +478,37 @@ public class RateHUD extends Module {
             case TOP_LEFT, TOP_RIGHT -> margin;
             case BOTTOM_LEFT, BOTTOM_RIGHT -> screenHeight - height - margin;
         };
-
+ 
         context.fill(x - 1, y - 1, x + width + 1, y + height + 1, 0x66000000);
         context.fill(x, y, x + width, y + height, 0xaa101010);
-        context.drawTextWithShadow(textRenderer, title, x + padding, y + padding, titleColor);
-
+        
+        // Piece together the title securely line-by-line using individual color weights
+        int curX = x + padding;
+        context.drawTextWithShadow(textRenderer, "RateHUD ", curX, y + padding, titleYellow);
+        curX += textRenderer.getWidth("RateHUD ");
+        context.drawTextWithShadow(textRenderer, "| ", curX, y + padding, grayBar);
+        curX += textRenderer.getWidth("| ");
+        context.drawTextWithShadow(textRenderer, resourceName, curX, y + padding, resourceColor);
+ 
         int rowY = y + padding + lineHeight + 1;
         int valueX = x + padding + labelWidth + gap;
-        drawRow(context, textRenderer, labels[0], values[0], x + padding, valueX, rowY, labelColor, resourceColor);
+        
+        drawRow(context, textRenderer, labels[0], values[0], x + padding, valueX, rowY, labelColor, valueColor);
         drawRow(context, textRenderer, labels[1], values[1], x + padding, valueX, rowY + lineHeight, labelColor, valueColor);
         drawRow(context, textRenderer, labels[2], values[2], x + padding, valueX, rowY + lineHeight * 2, labelColor, valueColor);
-        drawRow(context, textRenderer, labels[3], values[3], x + padding, valueX, rowY + lineHeight * 3, labelColor, valueColor);
-        drawRow(context, textRenderer, labels[4], values[4], x + padding, valueX, rowY + lineHeight * 4, labelColor, displayPaused ? 0xffff5555 : valueColor);
+        drawRow(context, textRenderer, labels[3], values[3], x + padding, valueX, rowY + lineHeight * 3, labelColor, displayPaused ? 0xffff5555 : valueColor);
     }
-
-    private void drawRow(DrawContext context, TextRenderer textRenderer, String label, String value, int labelX, int valueX, int y, int labelColor, int valueColor) {
+ 
+    private void drawRow(DrawContext context, TextRenderer textRenderer, String label, String value,
+                         int labelX, int valueX, int y, int labelColor, int valueColor) {
         context.drawTextWithShadow(textRenderer, label, labelX, y, labelColor);
         context.drawTextWithShadow(textRenderer, value, valueX, y, valueColor);
     }
-
+ 
     private void clearDisplayStats() {
         displayResource = null;
         displayBlocksPerHour = "0";
-        displayCompressionPrefix = "Comp.";
+        displayCompressionPrefix = "Comp";
         displayCompressionPerHour = 0;
         displayCompressionMined = 0;
         displayPaused = false;
