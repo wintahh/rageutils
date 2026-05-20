@@ -1,7 +1,6 @@
 package wintahh.rageutils.command;
 
 import com.mojang.brigadier.CommandDispatcher;
-import com.mojang.brigadier.tree.LiteralCommandNode;
 import net.fabricmc.fabric.api.client.command.v2.ClientCommandManager;
 import net.fabricmc.fabric.api.client.command.v2.ClientCommandRegistrationCallback;
 import net.fabricmc.fabric.api.client.command.v2.FabricClientCommandSource;
@@ -11,8 +10,7 @@ import net.minecraft.text.Text;
 
 import wintahh.rageutils.module.Module;
 import wintahh.rageutils.module.ModuleRegistry;
-
-import com.mojang.brigadier.arguments.StringArgumentType;
+import wintahh.rageutils.module.RateHUD;
 
 public class RageUtilsCommand {
 
@@ -30,12 +28,12 @@ public class RageUtilsCommand {
                     MinecraftClient mc = MinecraftClient.getInstance();
                     if (mc.player != null) {
                         mc.player.sendMessage(
-                            Text.literal("§c[RageUtils] §rHi " + mc.player.getName().getString() + "! Welcome to RageUtils! The current modules are:"),
+                            Text.literal("\u00a7c[RageUtils] \u00a7rHi " + mc.player.getName().getString() + "! Welcome to RageUtils! The current modules are:"),
                             false
                         );
                         for (Module m : ModuleRegistry.getAll()) {
                             mc.player.sendMessage(
-                                Text.literal("§c[RageUtils] §r" + m.getName() + " §7: §e" + m.getCommand()),
+                                Text.literal("\u00a7c[RageUtils] \u00a7r" + m.getName() + " \u00a77: \u00a7e" + m.getCommand()),
                                 false
                             );
                         }
@@ -64,7 +62,28 @@ public class RageUtilsCommand {
                         .executes(ctx -> {
                             RageUtils.RATE_HUD.resetCounters();
                             return 1;
-                        })))
+                        }))
+                    .then(ClientCommandManager.literal("anchor")
+                        .then(ClientCommandManager.literal("tl")
+                            .executes(ctx -> {
+                                RageUtils.RATE_HUD.setAnchor(RateHUD.Anchor.TOP_LEFT);
+                                return 1;
+                            }))
+                        .then(ClientCommandManager.literal("tr")
+                            .executes(ctx -> {
+                                RageUtils.RATE_HUD.setAnchor(RateHUD.Anchor.TOP_RIGHT);
+                                return 1;
+                            }))
+                        .then(ClientCommandManager.literal("bl")
+                            .executes(ctx -> {
+                                RageUtils.RATE_HUD.setAnchor(RateHUD.Anchor.BOTTOM_LEFT);
+                                return 1;
+                            }))
+                        .then(ClientCommandManager.literal("br")
+                            .executes(ctx -> {
+                                RageUtils.RATE_HUD.setAnchor(RateHUD.Anchor.BOTTOM_RIGHT);
+                                return 1;
+                            }))))
                 // ghostblockfix
                 .then(ClientCommandManager.literal("gbf")
                     .executes(ctx -> {
@@ -93,7 +112,7 @@ private static void sendBetaNotice(String featureName) {
     MinecraftClient mc = MinecraftClient.getInstance();
     if (mc.player != null) {
         mc.player.sendMessage(
-            Text.literal("§c[RageUtils] §e" + featureName + " is a beta feature."),
+            Text.literal("\u00a7c[RageUtils] \u00a7e" + featureName + " is a beta feature."),
             false
         );
     }

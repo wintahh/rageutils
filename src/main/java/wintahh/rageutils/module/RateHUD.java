@@ -2,12 +2,15 @@ package wintahh.rageutils.module;
 
 import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents;
 import net.minecraft.client.MinecraftClient;
+import net.minecraft.client.font.TextRenderer;
+import net.minecraft.client.gui.DrawContext;
 import net.minecraft.item.ItemStack;
 import net.minecraft.text.Text;
 import net.minecraft.util.math.Direction;
 import net.minecraft.util.math.BlockPos;
 import wintahh.rageutils.RageUtils;
 
+import java.util.Locale;
 import java.util.*;
 
 public class RateHUD extends Module {
@@ -61,7 +64,21 @@ public class RateHUD extends Module {
         }
     }
 
+    public enum Anchor {
+        TOP_LEFT("top-left"),
+        TOP_RIGHT("top-right"),
+        BOTTOM_LEFT("bottom-left"),
+        BOTTOM_RIGHT("bottom-right");
+
+        public final String label;
+
+        Anchor(String label) {
+            this.label = label;
+        }
+    }
+
     private boolean miningEnabled = false;
+    private Anchor anchor = Anchor.TOP_LEFT;
     private final Map<String, Long> previousBaseUnits = new HashMap<>();
     private final List<ResourceType> resources = new ArrayList<>();
 
@@ -71,6 +88,12 @@ public class RateHUD extends Module {
 
     private long pausedDuration = 0;
     private long pauseStart = 0;
+    private ResourceType displayResource = null;
+    private String displayBlocksPerHour = "0";
+    private String displayCompressionPrefix = "Comp.";
+    private double displayCompressionPerHour = 0;
+    private double displayCompressionMined = 0;
+    private boolean displayPaused = false;
 
     public RateHUD() {
         super("RateHUD", "/ru rh");
@@ -218,7 +241,18 @@ public class RateHUD extends Module {
         MinecraftClient mc = MinecraftClient.getInstance();
         if (mc.player != null) {
             mc.player.sendMessage(
-                Text.literal("[RageUtils] RateHUD Mining: " + (miningEnabled ? "§aON" : "§cOFF")),
+                Text.literal("[RageUtils] RateHUD Mining: " + (miningEnabled ? "\u00a7aON" : "\u00a7cOFF")),
+                false
+            );
+        }
+    }
+
+    public void setAnchor(Anchor anchor) {
+        this.anchor = anchor;
+        MinecraftClient mc = MinecraftClient.getInstance();
+        if (mc.player != null) {
+            mc.player.sendMessage(
+                Text.literal("[RageUtils] RateHUD anchor: §e" + anchor.label),
                 true
             );
         }
@@ -232,6 +266,7 @@ public class RateHUD extends Module {
         pauseStart = 0;
         lastBreakTime = System.currentTimeMillis();
         previousBaseUnits.clear();
+        clearDisplayStats();
         MinecraftClient mc = MinecraftClient.getInstance();
         if (mc.player != null) {
             previousBaseUnits.putAll(getBaseUnitSnapshot(mc));
@@ -277,7 +312,10 @@ public class RateHUD extends Module {
 
     public void registerEvents() {
         ClientTickEvents.END_CLIENT_TICK.register(client -> {
-            if (!miningEnabled || client.player == null || client.world == null) return;
+            if (!miningEnabled || client.player == null || client.world == null) {
+                clearDisplayStats();
+                return;
+            }
 
             Map<String, Long> current = getBaseUnitSnapshot(client);
             processDelta(current);
@@ -285,8 +323,10 @@ public class RateHUD extends Module {
             previousBaseUnits.putAll(current);
 
             ResourceType top = getTopResource();
-            if (top == null) return;
-            if (startTime == 0) return;
+            if (top == null || startTime == 0) {
+                clearDisplayStats();
+                return;
+            }
 
             long now = System.currentTimeMillis();
             boolean isPaused = (now - lastBreakTime) > 3000;
@@ -306,24 +346,95 @@ public class RateHUD extends Module {
             double blocksPerHour = elapsedHours > 0 ? totalBlocksBroken / elapsedHours : 0;
             String blocksPerHourStr;
             if (blocksPerHour >= 100_000) {
-                blocksPerHourStr = String.format("%.0fk", blocksPerHour / 1000);
+                blocksPerHourStr = String.format(Locale.ROOT, "%.0fk", blocksPerHour / 1000);
             } else {
-                blocksPerHourStr = String.format("%.0f", blocksPerHour);
+                blocksPerHourStr = String.format(Locale.ROOT, "%.0f", blocksPerHour);
             }
             double maxCompCount = (double) top.totalUnits / top.getMaxCompressionValue();
             double maxCompPerHour = elapsedHours > 0 ? maxCompCount / elapsedHours : 0;
             String maxPrefix = top.getMaxCompressionName();
 
-            String stats = String.format(
-                " §7| §fBlocks/h: §a%s §7| §f%s/h: §a%.2f §7| §f%s mined: §a%.2f%s",
-                blocksPerHourStr, maxPrefix, maxCompPerHour, maxPrefix, maxCompCount,
-                isPaused ? " §7[PAUSED]" : ""
-            );
+            displayResource = top;
+            displayBlocksPerHour = blocksPerHourStr;
+            displayCompressionPrefix = maxPrefix;
+            displayCompressionPerHour = maxCompPerHour;
+            displayCompressionMined = maxCompCount;
+            displayPaused = isPaused;
 
-            client.player.sendMessage(
-                top.getDisplayName().copy().append(Text.literal(stats)),
-                true
-            );
         });
+    }
+
+    public void renderHud(DrawContext context) {
+        if (!miningEnabled) return;
+
+        MinecraftClient mc = MinecraftClient.getInstance();
+        if (mc.player == null || mc.options.hudHidden) return;
+
+        TextRenderer textRenderer = mc.textRenderer;
+        int padding = 5;
+        int lineHeight = 10;
+        int titleColor = 0xfffff04b;
+        int labelColor = 0xffffffff;
+        int valueColor = 0xff55ff55;
+        int mutedColor = 0xffa8a8a8;
+
+        String title = "RageUtils Rate Tracker";
+        String resourceName = displayResource == null ? "Waiting for drops" : displayResource.name;
+        int resourceColor = displayResource == null ? mutedColor : (0xff000000 | displayResource.color);
+        String compRateLine = String.format(Locale.ROOT, "%.2f", displayCompressionPerHour);
+        String compMinedLine = String.format(Locale.ROOT, "%.2f", displayCompressionMined);
+        String statusLine = displayPaused ? "PAUSED" : "ACTIVE";
+
+        String compRateLabel = displayCompressionPrefix + "/h";
+        String compMinedLabel = displayCompressionPrefix + " mined";
+        String[] labels = {"Resource", "Blocks/h", compRateLabel, compMinedLabel, "Status"};
+        String[] values = {resourceName, displayBlocksPerHour, compRateLine, compMinedLine, statusLine};
+
+        int labelWidth = 0;
+        int valueWidth = 0;
+        for (String label : labels) labelWidth = Math.max(labelWidth, textRenderer.getWidth(label));
+        for (String value : values) valueWidth = Math.max(valueWidth, textRenderer.getWidth(value));
+
+        int gap = 12;
+        int width = Math.max(textRenderer.getWidth(title), labelWidth + gap + valueWidth) + padding * 2;
+        int height = padding * 2 + lineHeight * (labels.length + 1);
+
+        int margin = 8;
+        int screenWidth = context.getScaledWindowWidth();
+        int screenHeight = context.getScaledWindowHeight();
+        int x = switch (anchor) {
+            case TOP_LEFT, BOTTOM_LEFT -> margin;
+            case TOP_RIGHT, BOTTOM_RIGHT -> screenWidth - width - margin;
+        };
+        int y = switch (anchor) {
+            case TOP_LEFT, TOP_RIGHT -> margin;
+            case BOTTOM_LEFT, BOTTOM_RIGHT -> screenHeight - height - margin;
+        };
+
+        context.fill(x - 1, y - 1, x + width + 1, y + height + 1, 0x66000000);
+        context.fill(x, y, x + width, y + height, 0xaa101010);
+        context.drawTextWithShadow(textRenderer, title, x + padding, y + padding, titleColor);
+
+        int rowY = y + padding + lineHeight + 1;
+        int valueX = x + padding + labelWidth + gap;
+        drawRow(context, textRenderer, labels[0], values[0], x + padding, valueX, rowY, labelColor, resourceColor);
+        drawRow(context, textRenderer, labels[1], values[1], x + padding, valueX, rowY + lineHeight, labelColor, valueColor);
+        drawRow(context, textRenderer, labels[2], values[2], x + padding, valueX, rowY + lineHeight * 2, labelColor, valueColor);
+        drawRow(context, textRenderer, labels[3], values[3], x + padding, valueX, rowY + lineHeight * 3, labelColor, valueColor);
+        drawRow(context, textRenderer, labels[4], values[4], x + padding, valueX, rowY + lineHeight * 4, labelColor, displayPaused ? 0xffff5555 : valueColor);
+    }
+
+    private void drawRow(DrawContext context, TextRenderer textRenderer, String label, String value, int labelX, int valueX, int y, int labelColor, int valueColor) {
+        context.drawTextWithShadow(textRenderer, label, labelX, y, labelColor);
+        context.drawTextWithShadow(textRenderer, value, valueX, y, valueColor);
+    }
+
+    private void clearDisplayStats() {
+        displayResource = null;
+        displayBlocksPerHour = "0";
+        displayCompressionPrefix = "Comp.";
+        displayCompressionPerHour = 0;
+        displayCompressionMined = 0;
+        displayPaused = false;
     }
 }
