@@ -40,15 +40,15 @@ public class ClientSideBlast extends Module {
         }
     }
 
-    public boolean shouldBlast(BlockPos pos) {
-        if (!isEnabled()) return false;
-
+    public boolean canBlastTarget(BlockPos pos) {
         MinecraftClient mc = MinecraftClient.getInstance();
         if (mc.player == null || mc.world == null) return false;
 
+        BlockState state = mc.world.getBlockState(pos);
+        if (state.isAir()) return false;
+
         ItemStack held = mc.player.getMainHandStack();
 
-        // if held isnt a tool that can have blast
         if (!held.isIn(ItemTags.PICKAXES) &&
             !held.isIn(ItemTags.AXES) &&
             !held.isIn(ItemTags.SHOVELS) &&
@@ -57,50 +57,29 @@ public class ClientSideBlast extends Module {
             return false;
         }
 
-        // check for blast enchant in the lore
         LoreComponent lore = held.get(DataComponentTypes.LORE);
         if (lore == null) return false;
         boolean hasBlastEnchant = lore.lines().stream()
             .anyMatch(line -> line.getString().equals("Blast I"));
         if (!hasBlastEnchant) return false;
 
-        BlockState state = mc.world.getBlockState(pos);
-
-        // for some reason shears dont work with isSuitable so we're calling them early 
         if (held.getItem() == Items.SHEARS) { 
             if (state.isIn(BlockTags.WOOL) ||
                 state.isIn(BlockTags.LEAVES)) return true;
         }
-        // mushroom technically isnt suitable for hoes, call it early
+        
         if (state.isOf(Blocks.MUSHROOM_STEM)) {
             if (held.isIn(ItemTags.HOES)) return true;
-            if (held.isIn(ItemTags.AXES)) return false; // axe is suitable for mushroom stem, but not in ragemines, call it early
+            if (held.isIn(ItemTags.AXES)) return false; 
         }
 
-        // unsuitable, others
-        if (!held.isSuitableFor(state)) return false;
-
-        return true;
+        return held.isSuitableFor(state);
     }
 
-    public boolean canBlastTarget(BlockPos pos) {
-        MinecraftClient mc = MinecraftClient.getInstance();
-        if (mc.player == null || mc.world == null) return false;
-
-        BlockState targetState = mc.world.getBlockState(pos);
-        if (targetState.isAir()) return false;
-
-        ItemStack held = mc.player.getMainHandStack();
-        if (held.getItem() == Items.SHEARS) {
-            return targetState.isIn(BlockTags.WOOL) || targetState.isIn(BlockTags.LEAVES);
-        }
-      
-      if (targetState.isOf(Blocks.MUSHROOM_STEM)) {
-          if (held.isIn(ItemTags.HOES)) return true;
-          if (held.isIn(ItemTags.AXES)) return false; // axe is suitable for mushroom stem, but not in ragemines, call it early
-      }
-
-        return held.isSuitableFor(targetState);
+    // Now, shouldBlast uses the toggle state AND the condition
+    public boolean shouldBlast(BlockPos pos) {
+        if (!isEnabled()) return false;
+        return canBlastTarget(pos);
     }
 
     public List<PredictedBreak> planBreaks(BlockPos pos, Direction face) {
@@ -120,11 +99,9 @@ public class ClientSideBlast extends Module {
             else axisB = axis;
         }
 
-        // Iterate to form the 3x3 blast, but leave the center to vanilla breakBlock.
+        // Iterate to form the 3x3 blast
         for (int i = -1; i <= 1; i++) {
             for (int j = -1; j <= 1; j++) {
-                if (i == 0 && j == 0) continue;
-
                 BlockPos target = offset(pos, axisA, i, axisB, j);
                 if (!canBlastTarget(target)) continue;
                 breaks.add(new PredictedBreak(target.toImmutable(), mc.world.getBlockState(target)));
