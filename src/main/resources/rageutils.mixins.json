@@ -5,6 +5,7 @@
 	"mixins": [
 		"ClientPlayerInteractionManagerMixin",
 		"ClientPlayNetworkHandlerMixin",
+		"InGameHudMixin",
 		"SnappyInputMixin"
 	],
 	"injectors": {

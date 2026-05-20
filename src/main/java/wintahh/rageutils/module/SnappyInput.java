@@ -56,7 +56,8 @@ public class SnappyInput extends Module {
 
         mc.world.addBlockBreakParticles(pos, oldState);
         BlockSoundGroup soundGroup = oldState.getSoundGroup();
-        mc.world.playSoundClient(
+        SoundCompat.playClientSound(
+            mc,
             pos.getX() + 0.5,
             pos.getY() + 0.5,
             pos.getZ() + 0.5,

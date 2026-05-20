@@ -168,6 +168,7 @@ public class GhostBlockFix extends Module {
 
     private void drainProactiveEntries(MinecraftClient mc, long now) {
         if (!proactiveEnabled) return;
+        if (now - lastAnyVerificationAt < GLOBAL_VERIFY_COOLDOWN_MS) return;
 
         int drained = 0;
         Iterator<Map.Entry<BlockPos, Long>> iterator = pendingProactiveVerify.entrySet().iterator();
@@ -175,9 +176,10 @@ public class GhostBlockFix extends Module {
             Map.Entry<BlockPos, Long> entry = iterator.next();
             if (entry.getValue() > now) continue;
 
-            sendVerificationPacket(mc, entry.getKey());
-            iterator.remove();
-            drained++;
+            if (sendVerificationPacket(mc, entry.getKey())) {
+                iterator.remove();
+                drained++;
+            }
         }
     }
 

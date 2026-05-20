@@ -151,7 +151,8 @@ public class ClientSideBlast extends Module {
     private void playBreakSound(MinecraftClient mc, PredictedBreak predictedBreak) {
         BlockSoundGroup soundGroup = predictedBreak.oldState().getSoundGroup();
         BlockPos pos = predictedBreak.pos();
-        mc.world.playSoundClient(
+        SoundCompat.playClientSound(
+            mc,
             pos.getX() + 0.5,
             pos.getY() + 0.5,
             pos.getZ() + 0.5,

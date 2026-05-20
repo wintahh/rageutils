@@ -18,7 +18,7 @@ public abstract class Module {
         MinecraftClient mc = MinecraftClient.getInstance();
         if (mc.player != null) {
             mc.player.sendMessage(
-                Text.literal("[RageUtils] " + name + ": " + (enabled ? "§aON" : "§cOFF")),
+                Text.literal("[RageUtils] " + name + ": " + (enabled ? "\u00a7aON" : "\u00a7cOFF")),
                 true
             );
         }

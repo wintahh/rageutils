@@ -10,7 +10,7 @@
 	],
 	"license": "CC0-1.0",
 	"icon": "assets/rageutils/icon.png",
-	"environment": "*",
+	"environment": "client",
 	"entrypoints": {
 		"client": [
 			"wintahh.rageutils.RageUtils"
@@ -20,8 +20,8 @@
 		"rageutils.mixins.json"
 	],
 	"depends": {
-		"fabricloader": ">=0.19.2",
-		"minecraft": "~1.21.11",
+		"fabricloader": ">=0.15.11",
+		"minecraft": ">=1.21 <=1.21.11",
 		"java": ">=21",
 		"fabric-api": "*"
 	}
