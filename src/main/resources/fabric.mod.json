@@ -5,12 +5,9 @@
 	"name": "RageUtils",
 	"description": "Quality of Life mod for RageMines",
 	"authors": [
-		"wintahh"
+		"wintahh",
+		"Qav45"
 	],
-	"contact": {
-		"homepage": "https://fabricmc.net/",
-		"sources": "https://github.com/FabricMC/fabric-example-mod"
-	},
 	"license": "CC0-1.0",
 	"icon": "assets/rageutils/icon.png",
 	"environment": "client",

@@ -113,7 +113,7 @@ public class RateHUD extends Module {
         totalBlocksBroken++;
 
         // if blast would trigger
-        if (face != null && RageUtils.CLIENTSIDE_BLAST.shouldBlast(pos)) {
+        if (face != null && RageUtils.CLIENTSIDE_BLAST.isEnabled() && RageUtils.CLIENTSIDE_BLAST.shouldBlast(pos)) {
             Direction.Axis faceAxis = face.getAxis();
             Direction.Axis axisA = null;
             Direction.Axis axisB = null;
@@ -127,7 +127,7 @@ public class RateHUD extends Module {
                 for (int j = -1; j <= 1; j++) {
                     if (i == 0 && j == 0) continue; // center already counted above
                     BlockPos target = offsetPos(pos, axisA, i, axisB, j);
-                    if (!mc.world.getBlockState(target).isAir()) {
+                    if (RageUtils.CLIENTSIDE_BLAST.canBlastTarget(target)) {
                         totalBlocksBroken++;
                     }
                 }
@@ -265,6 +265,7 @@ public class RateHUD extends Module {
         pausedDuration = 0;
         pauseStart = 0;
         lastBreakTime = System.currentTimeMillis();
+        screenOpenLastTick = false;
         previousBaseUnits.clear();
         clearDisplayStats();
         MinecraftClient mc = MinecraftClient.getInstance();
@@ -314,6 +315,18 @@ public class RateHUD extends Module {
         ClientTickEvents.END_CLIENT_TICK.register(client -> {
             if (!miningEnabled || client.player == null || client.world == null) {
                 clearDisplayStats();
+                return;
+            }
+
+            if (client.currentScreen != null) {
+                screenOpenLastTick = true;
+                return;
+            }
+
+            if (screenOpenLastTick) {
+                previousBaseUnits.clear();
+                previousBaseUnits.putAll(getBaseUnitSnapshot(client));
+                screenOpenLastTick = false;
                 return;
             }
 
